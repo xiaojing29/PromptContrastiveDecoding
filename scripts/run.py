@@ -26,9 +26,9 @@ def main(args):
         print(f"Task added {lang_pair[0]} - {lang_pair[1]}")
 
     for task in tasks:
-        if args.source_contrastive or args.language_contrastive:
+        if args.source_contrastive or args.language_contrastive or args.prompt_contrastive:
             print(f"Evaluating {task} multi_source")
-            out_path = task.evaluate(model.translate_multi_source, 'contrastive', args.source_contrastive, args.source_weight, args.language_contrastive, args.language_weight)
+            out_path = task.evaluate(model.translate_multi_source, 'contrastive', args.source_contrastive, args.source_weight, args.language_contrastive, args.language_weight, args.prompt_contrastive, args.prompt_weight)
             print(f"Translations saved in {out_path}")
         else:
             print(f"Evaluating {task} direct")
@@ -49,6 +49,10 @@ if __name__ == "__main__":
                         help="language codes of languages for which to construct contrastive variants. Can be multiple (space-separated); 'src' will be mapped to language code of source language. Example: '--language_contrastive en src' will create two contrastive inputs, one with English, one with the source language as desired output language.")
     parser.add_argument("--language_weight", type=float, default=-0.1,
                         help="weight of contrastive variants with wrong language indicator. Default -0.1. If multiple contrastive inputs are used, this specifies weight assigned to each of them individually.")
+    parser.add_argument("--prompt_contrastive", action='store_true', default=False,
+                        help="enable prompt-contrastive decoding with positive and negative prompts")
+    parser.add_argument("--prompt_weight", type=float, default=-0.1,
+                        help="weight for contrastive variants with negative prompts. Default -0.1. If multiple contrastive inputs are used, this specifies weight assigned to each of them individually.")
     parser.add_argument("--oneshot", action='store_true', default=False,
                         help="For LLaMa: provide one-shot translation example")
     args = parser.parse_args()

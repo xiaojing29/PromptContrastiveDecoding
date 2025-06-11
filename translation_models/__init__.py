@@ -8,7 +8,6 @@ from typing import List, Union, Tuple, Set, Optional
 
 from tqdm import tqdm
 
-
 class TranslationModel:
 
     def __str__(self):
@@ -96,15 +95,21 @@ def load_translation_model(name: str, **kwargs) -> TranslationModel:
     elif name == "small100":
         from translation_models.small100 import SMaLL100Model
         translation_model = SMaLL100Model(model_name_or_path="alirezamsh/small100", **kwargs)
-    elif name == "llama-2-7b-chat":
+    elif name == "llama-3-8b-instruct":
         from translation_models.llama import LLaMaTranslationModel
-        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Llama-2-7b-chat-hf", **kwargs)
-    elif name == "llama-2-13b-chat":
+        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Meta-Llama-3-8B-Instruct", **kwargs)
+    elif name == "llama-3-70b-instruct":
         from translation_models.llama import LLaMaTranslationModel
-        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Llama-2-13b-chat-hf", **kwargs)
-    elif name == "llama-2-70b-chat":
+        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Meta-Llama-3-70B-Instruct", **kwargs)
+    elif name == "llama-3.1-8b-instruct":
         from translation_models.llama import LLaMaTranslationModel
-        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Llama-2-70b-chat-hf", **kwargs)
+        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Meta-Llama-3.1-8B-Instruct", **kwargs)
+    elif name == "llama-3.1-70b-instruct":
+        from translation_models.llama import LLaMaTranslationModel
+        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Meta-Llama-3.1-70B-Instruct", **kwargs)
+    elif name == "llama-3.1-405b-instruct":
+        from translation_models.llama import LLaMaTranslationModel
+        translation_model = LLaMaTranslationModel(model_name_or_path="meta-llama/Llama-3.1-405B-Instruct", **kwargs)
     else:
         raise NotImplementedError
     return translation_model

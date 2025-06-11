@@ -1,0 +1,26 @@
+# Byte-compiled / cache files
+__pycache__/
+*.pyc
+
+# OS junk files
+.DS_Store
+
+# IDE/project files
+.idea/
+.vscode/
+
+# Python virtual environments
+myvenv/
+
+# Model weights and large files
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+
+# Cache
+.cache/
+
+
+# Notebook checkpoints
+.ipynb_checkpoints/

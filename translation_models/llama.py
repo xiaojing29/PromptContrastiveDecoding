@@ -9,6 +9,7 @@ from scripts.utils_run import FLORES101_CONVERT
 from translation_models import TranslationModel
 from translation_models.m2m100 import EnsembleLogitsProcessor
 from translation_models.utils_llama import language_names, one_shot_sentences
+from translation_models.prompts import POSITIVE_PROMPTS, NEGATIVE_PROMPTS
 
 
 class LLaMaTranslationModel(TranslationModel):
@@ -36,13 +37,33 @@ class LLaMaTranslationModel(TranslationModel):
         self.model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map='auto', load_in_4bit=True,
                                                           torch_dtype=torch.bfloat16)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-        self.pipeline = pipeline('text-generation', model=self.model, tokenizer=self.tokenizer)
         self.message_template = message_template
         self.one_shot = one_shot
-        assert padding in ["before_system_prompt", "after_system_prompt"]
+
+        assert padding in ["before_system_prompt", "after_system_prompt"], \
+            "Padding must be 'before_system_prompt' or 'after_system_prompt'"
+        if padding == "before_system_prompt":
+            self.tokenizer.padding_side = 'left'
+        elif padding == "after_system_prompt":
+            self.tokenizer.padding_side = 'right'
+
         self.padding = padding
         self.src_lang = None
         self.tgt_lang = None
+
+        # Terminators for Llama3 and 3.1
+        self.eos_token_ids = [
+            self.tokenizer.eos_token_id,
+            self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+        ]
+
+        # Add a new pad token
+        if self.tokenizer.pad_token is None:
+          self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+          self.model.resize_token_embeddings(len(self.tokenizer))
+          logging.info("Adding new pad token '[PAD]")
+
+        self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
     def __str__(self):
         return str(self.model_name_or_path).replace("/", "_")
@@ -103,20 +124,35 @@ class LLaMaTranslationModel(TranslationModel):
 
         translations = []
         for source_sentence in tqdm(source_sentences):
-            prompt_template = PromptTemplate(system_prompt=system_prompt)
             message = self.message_template.format(
                 src_lang=self._lang_code_to_name(self.src_lang),
                 tgt_lang=self._lang_code_to_name(self.tgt_lang),
                 src_sent=source_sentence,
             )
             logging.info(message)
-            prompt_template.add_user_message(message)
-            prompt = prompt_template.build_prompt()
-            prompt += "Sure, here's the translation:\n"
-            inputs = self.pipeline.preprocess(prompt)
-            output = self.pipeline.forward(
-                inputs,
-                eos_token_id=self.tokenizer.eos_token_id,
+
+            # Prepare messages for Llama3 with roles: system, user, assistant
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "Sure, here's the translation:\n"}
+            ]
+
+            print(f"Messages sent to the model: \n{messages}")
+
+            # Tokenize messages
+            input_ids = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                return_tensors="pt",
+                padding=True,
+            ).to(self.model.device)
+
+            # Generate responses
+            outputs = self.model.generate(
+                input_ids,
+                pad_token_id=self.tokenizer.pad_token_id,  # Add pad token
+                eos_token_id=self.eos_token_ids,
                 max_length=1200,  # Max ref length across Flores-101 is 960
                 remove_invalid_values=True,
                 num_beams=num_beams,
@@ -124,18 +160,21 @@ class LLaMaTranslationModel(TranslationModel):
                 do_sample=False,
                 temperature=1.0,
                 top_p=1.0,
+                **kwargs
             )
-            output = self.pipeline.postprocess(output)
-            output = output[0]['generated_text']
+            # print(f"Outputs for direct translation: \n{outputs}")
+
+            response = outputs[0][input_ids.shape[-1]:]
+            output = self.tokenizer.decode(response, skip_special_tokens=True)
+            # print(f"Model's output:\n{output}")
             logging.info(output)
-            prompt_template.add_model_reply(output, includes_history=True)
-            response = prompt_template.get_model_replies(strip=True)[0]
-            response_lines = response.replace("Sure, here's the translation:", "").strip().split("\n")
+            response_lines = output.replace("Sure, here's the translation:", "").strip().split("\n")
             if not response_lines:
                 translation = ""
             else:
                 translation = response_lines[0].strip()
             translations.append(translation)
+            print(f"Translations:\n{translation}")
         return translations
 
     def _translate_multi_source(self,
@@ -144,6 +183,7 @@ class LLaMaTranslationModel(TranslationModel):
                                 tgt_langs: List[str],
                                 src_weights: Optional[List[float]] = None,
                                 num_beams: int = 1,
+                                is_prompt_contrastive=False,
                                 **kwargs,
                                 ) -> str:
         assert len(multi_source_sentences) == len(src_langs) == len(tgt_langs)
@@ -154,12 +194,12 @@ class LLaMaTranslationModel(TranslationModel):
             num_beams = 1
 
         prompts = []
-        prompt_templates = []
         for src_sent, src_lang, tgt_lang in zip(multi_source_sentences, src_langs, tgt_langs):
             system_prompt = self.SYSTEM_PROMPT.format(
                 src_lang=self._lang_code_to_name(src_lang),
                 tgt_lang=self._lang_code_to_name(tgt_lang),
             )
+
             if self.one_shot:
                 system_prompt += "\n\nExample instruction:\n{instruction}\n\nExample response:\nSure, here's the translation:\n{response}".format(
                     instruction=self.message_template.format(
@@ -169,47 +209,95 @@ class LLaMaTranslationModel(TranslationModel):
                     ),
                     response=one_shot_sentences[FLORES101_CONVERT.get(tgt_lang, tgt_lang)],
                 )
-            prompt_template = PromptTemplate(system_prompt=system_prompt)
-            message = self.message_template.format(
-                src_lang=self._lang_code_to_name(src_lang),
-                tgt_lang=self._lang_code_to_name(tgt_lang),
-                src_sent=src_sent,
+
+            if is_prompt_contrastive:
+                # Split src_sent into original source sentence and positive/negative prompt
+                if "\n\n" in src_sent:
+                    original_source, prompt = src_sent.split("\n\n", 1)
+                else:
+                    original_source, prompt = src_sent, ""
+
+                # Create user message with original source sentence
+                message = self.message_template.format(
+                    src_lang=self._lang_code_to_name(src_lang),
+                    tgt_lang=self._lang_code_to_name(tgt_lang),
+                    src_sent=original_source,
+                )
+
+                # Append positive/negative prompt to the message
+                full_message = f"{prompt}\n\n{message}"
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": full_message},
+                    {"role": "assistant", "content": "Sure, here's the translation:\n"}
+                ]
+
+            else:
+                # Use TEMPLATE_0 directly with source_contrastive and language_contrastive
+                message = self.message_template.format(
+                    src_lang=self._lang_code_to_name(src_lang),
+                    tgt_lang=self._lang_code_to_name(tgt_lang),
+                    src_sent=src_sent,
+                )
+
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": "Sure, here's the translation:\n"}
+                ]
+
+            prompts.append(messages)
+            print(f"Prompts: \n{prompts}")
+
+        # Tokenize messages
+        input_ids = []
+        attention_masks = []
+
+        for messages in prompts:
+            inputs = self.tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                padding=False,
+                return_tensors='pt',
             )
-            prompt_template.add_user_message(message)
-            prompt = prompt_template.build_prompt()
-            prompt += "Sure, here's the translation:\n"
-            prompts.append(prompt)
-            prompt_templates.append(prompt_template)
+            input_ids.append(inputs[0])
+            attention_masks.append(torch.ones_like(inputs[0]))
 
-        inputs = [self.pipeline.preprocess(prompt) for prompt in prompts]
-        input_ids = [x['input_ids'][0].tolist() for x in inputs]
-        attention_mask = [x['attention_mask'][0].tolist() for x in inputs]
+        # Manual padding
+        max_len = max(tensor.size(0) for tensor in input_ids)
+        padded_input_ids = []
+        padded_attention_masks = []
+        pad_token_id = self.tokenizer.pad_token_id
 
-        pad_token_id = self.tokenizer.get_vocab()["▁"]
-        max_len = max(len(x) for x in input_ids)
-        if self.padding == "before_system_prompt":
-            input_ids = [[pad_token_id] * (max_len - len(x)) + x for x in input_ids]
-            attention_mask = [[0] * (max_len - len(x)) + x for x in attention_mask]
-        elif self.padding == "after_system_prompt":
-            sys_end_id = self.tokenizer.get_vocab()[">>"]
-            for i in range(len(input_ids)):
-                second_inst_idx = input_ids[i].index(sys_end_id, 1)
-                input_ids[i] = (input_ids[i][:second_inst_idx + 1] +
-                                [pad_token_id] * (max_len - len(input_ids[i])) +
-                                input_ids[i][second_inst_idx + 1:])
-                attention_mask[i] = (attention_mask[i][:second_inst_idx + 1] +
-                                     [0] * (max_len - len(attention_mask[i])) +
-                                     attention_mask[i][second_inst_idx + 1:])
+        for ids, mask in zip(input_ids, attention_masks):
+            pad_len = max_len - ids.size(0)
+            if self.padding == "before_system_prompt":
+                padded_ids = torch.cat([torch.full((pad_len,), pad_token_id, dtype=ids.dtype), ids])
+                padded_mask = torch.cat([torch.zeros(pad_len, dtype=mask.dtype), mask])
+            else:
+                padded_ids = torch.cat([ids, torch.full((pad_len,), pad_token_id, dtype=ids.dtype)])
+                padded_mask = torch.cat([mask, torch.zeros(pad_len, dtype=mask.dtype)])
+            padded_input_ids.append(padded_ids)
+            padded_attention_masks.append(padded_mask)
 
-        input_ids = torch.tensor(input_ids).to(self.model.device)
-        attention_mask = torch.tensor(attention_mask).to(self.model.device)
+        # Batch inputs
+        input_ids = torch.stack(padded_input_ids).to(self.model.device)
+        attention_mask = torch.stack(padded_attention_masks).to(self.model.device)
+
+        #print(f"Input Ids: \n{input_ids}")
+        #print(f"Attention Masks: \n{attention_mask}")
+
+        # Generate with logits processor for contrastive decoding
         logits_processor = LogitsProcessorList([
             EnsembleLogitsProcessor(num_beams=num_beams, source_weights=src_weights),
         ])
-        output = self.model.generate(
+
+        outputs = self.model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             num_beams=num_beams,
+            pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id,
             max_length=1200,
             logits_processor=logits_processor,
@@ -220,90 +308,17 @@ class LLaMaTranslationModel(TranslationModel):
             top_p=1.0,
             **kwargs,
         )
-        output = output.reshape(1, output.shape[0], *output.shape[1:])
-        output = {
-            "generated_sequence": output,
-            "input_ids": input_ids[0],
-            "prompt_text": prompts[0],
-        }
-        output = self.pipeline._ensure_tensor_on_device(output, device=torch.device("cpu"))
-        output = self.pipeline.postprocess(output)
-        output = output[0]['generated_text']
-        _, output = output.rsplit("[/INST]", maxsplit=1)
-        logging.info(output)
-        prompt_templates[0].add_model_reply(output, includes_history=False)
-        response = prompt_templates[0].get_model_replies(strip=True)[0]
-        response_lines = response.replace("Sure, here's the translation:", "").strip().split("\n")
+        #print(f"Outputs by Llama 3.1: \n{outputs}")
+
+        response = outputs[0][input_ids.shape[-1]:]
+        output = self.tokenizer.decode(response, skip_special_tokens=True)
+
+        response_lines = output.replace("Sure, here's the translation:", "").strip().split("\n")
+
         if not response_lines:
             translation = ""
         else:
             translation = response_lines[0].strip()
+        print(f"Translation: \n{translation}")
         return translation
 
-
-class PromptTemplate:
-    """
-    Manages the conversation with a LLaMa chat model.
-
-    Adapted from https://github.com/samrawal/llama2_chat_templater
-    (c) Sam Rawal
-
-    Adapted to be more similar to https://huggingface.co/blog/llama2#how-to-prompt-llama-2
-    """
-
-    def __init__(self, system_prompt=None, add_initial_inst=True):
-        self.system_prompt = system_prompt
-        self.add_initial_inst = add_initial_inst
-        self.user_messages = []
-        self.model_replies = []
-
-    def add_user_message(self, message: str, return_prompt=True):
-        self.user_messages.append(message)
-        if return_prompt:
-            return self.build_prompt()
-
-    def add_model_reply(self, reply: str, includes_history=True, return_reply=True):
-        reply_ = reply.replace(self.build_prompt(), "") if includes_history else reply
-        self.model_replies.append(reply_)
-        if len(self.user_messages) != len(self.model_replies):
-            raise ValueError(
-                "Number of user messages does not equal number of system replies."
-            )
-        if return_reply:
-            return reply_
-
-    def get_user_messages(self, strip=True):
-        return [x.strip() for x in self.user_messages] if strip else self.user_messages
-
-    def get_model_replies(self, strip=True):
-        return [x.strip() for x in self.model_replies] if strip else self.model_replies
-
-    def build_prompt(self):
-        if len(self.user_messages) != len(self.model_replies) + 1:
-            raise ValueError(
-                "Error: Expected len(user_messages) = len(model_replies) + 1. Add a new user message!"
-            )
-
-        if self.system_prompt is not None:
-            SYS = f"[INST] <<SYS>>\n{self.system_prompt}\n<</SYS>>"
-        else:
-            SYS = ""
-
-        CONVO = ""
-        SYS = "<s>" + SYS
-        for i in range(len(self.user_messages) - 1):
-            user_message, model_reply = self.user_messages[i], self.model_replies[i]
-            conversation_ = f"{user_message} [/INST] {model_reply} </s>"
-            if i != 0:
-                conversation_ = "[INST] " + conversation_
-            CONVO += conversation_
-
-        if self.add_initial_inst:
-            CONVO += f"[INST] {self.user_messages[-1]} [/INST]"
-        else:
-            if len(self.user_messages) <= 1:
-                CONVO += f" {self.user_messages[-1]} [/INST]"
-            else:
-                raise NotImplementedError
-
-        return SYS + CONVO
