@@ -35,12 +35,12 @@ This project is based on the source-contrastive and language-contrastive decodin
 **Main modifications in this repository:**
 
 - **llama.py**:
- 1. Added pad token, set padding side, and defined EOS token IDs for Llama 3.1 models
- 2. Used role-based chat template and tokenizer's `apply_chat_template` method for Llama 3.1 models
- 3. Removed the `PromptTemplate` class as the chat template now handles prompt formatting
- 4. Replaced pipeline use (preprocess, forward, and postprocess) as the chat template for Llama 3.1 is a list of dictionaries, but pipeline does not accept it
- 5. Made changes to padding side and token, stacked padded tensors into a single batch tensor as input to the model
- 6. Added a new parameter `is_prompt_contrastive` to handle contrastive prompts
+  1. Added pad token, set padding side, and defined EOS token IDs for Llama 3.1 models
+  2. Used role-based chat template and tokenizer's `apply_chat_template` method for Llama 3.1 models
+  3. Removed the `PromptTemplate` class as the chat template now handles prompt formatting
+  4. Replaced pipeline use (preprocess, forward, and postprocess) as the chat template for Llama 3.1 is a list of dictionaries, but pipeline does not accept it
+  5. Made changes to padding side and token, stacked padded tensors into a single batch tensor as input to the model
+  6. Added a new parameter `is_prompt_contrastive` to handle contrastive prompts
 
 - **__init__.py**: Added Llama 3 and 3.1 models
 
