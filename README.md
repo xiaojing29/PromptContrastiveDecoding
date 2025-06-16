@@ -30,7 +30,7 @@ This project is based on the source-contrastive and language-contrastive decodin
 
 - **Source-contrastive decoding**: Search for a translation that maximizes P(_Y_|_X_) - λ·P(_Y_|_X'_), where _X'_ is a random source segment. This penalizes hallucinations.
 - **Language-contrastive decoding**: Search for a translation that maximizes P(_Y_|_X_,_l_y_) - λ·P(_Y_|_X_,_l_y'_), where _l_y_ is the language indicator for the desired target language, and _l_y'_ the indicator for an undesired language (such as English or the source language). This penalizes off-target translations.
-- **Prompt-contrastive decoding** (this work): Search for a translation that maximizes P(_Y_|_X_,_p_pos_) – λ·P(_Y_|_X'_,_p_neg_), where _p_pos_ is the positive prompt that encourages desired translation behavior and _p_neg_ the negative prompt inducing undesired translation behavior such as omissions. This penalizes omissions.
+- **Prompt-contrastive decoding** (this work): Search for a translation that maximizes P(_Y_|_X_, _p_pos_) – λ·P(_Y_|_X'_, _p_neg_), where _p_pos_ is the positive prompt that encourages desired translation behavior and _p_neg_ the negative prompt inducing undesired translation behavior such as omissions. This penalizes omissions.
 
 **Main modifications in this repository:**
 
