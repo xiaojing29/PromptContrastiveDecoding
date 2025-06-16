@@ -65,8 +65,14 @@ This project is based on the source-contrastive and language-contrastive decodin
 - `LICENSE`, `README.md`, `requirements.txt`: Repository metadata and setup
 
 ## Virtual Environment
+- `python3 -m venv venv` for Linux/Mac
+### or
+- `python -m venv venv` for Windows
 
-- `source myvenv/bin/activate`
+### Activate the virtual environment
+- `source venv/bin/activate` for Linux/Mac
+- `venv\Scripts\activate` for Windows
+
 
 
 ## Installation
@@ -90,7 +96,7 @@ Source-contrastive decoding with [M2M-100 (418M)](https://arxiv.org/abs/2010.111
 Source-contrastive and language-contrastive decoding with [SMaLL-100](https://arxiv.org/abs/2210.11621) on Pashto–Asturian, with 2 random source segments, λ_src=0.7, λ_lang=0.1, and English and Pashto as contrastive target languages:
 - `python -m scripts.run --model_path small100 --language_pairs ps-ast --source_contrastive 2 --source_weight -0.7 --language_contrastive en ps  --language_weight -0.1`
 
-Language-contrastive decoding with [Llama 3.1 8B Instruct](https://arxiv.org/abs/2407.21783) on Mongolian-English, with λ_lang=0.1 and one contrastive prompt pair appended to user message:
+Prompt-contrastive decoding with [Llama 3.1 8B Instruct](https://arxiv.org/abs/2407.21783) on Mongolian-English, with λ_prompt=0.1 and one contrastive prompt pair appended to user message:
 - `python -m scripts.run --model_path llama-3.1-8b-instruct --language_pairs mn-en --prompt_contrastive  --prompt_weight -0.1`
 
 Source-contrastive and prompt-contrastive decoding with [Llama 3.1 8B Instruct](https://arxiv.org/abs/2407.21783) on Igbo-English, with 1 random source segment, λ_src=0.7, λ_prompt=0.1:
